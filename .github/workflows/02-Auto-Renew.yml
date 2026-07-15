@@ -1,0 +1,88 @@
+# Step 2: Cached scheduled automatic certificate renewal
+# 第二步：带缓存定时证书自动续期
+
+name: Step 2: Cached scheduled automatic certificate renewal
+# 第二步：带缓存定时证书自动续期
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain_list:
+        description: |
+          Keep the same domain list as first issuance
+          填写与首次签发完全一致的域名列表
+        required: true
+        default: "example.com *.example.com"
+
+  schedule:
+    - cron: "0 2 1 * *"
+
+permissions:
+  contents: write
+
+jobs:
+  ssl_renew:
+    runs-on: ubuntu-latest
+    env:
+      CF_Token: ${{ secrets.CF_TOKEN }}
+      CF_Zone_ID: ${{ secrets.CF_ZONE_ID }}
+      ACME_PATH: /home/runner/.acme.sh/acme.sh
+      DOMAINS: ${{ github.event.inputs.domain_list }}
+
+    steps:
+      - name: Pull repository source code
+        # 拉取仓库源码
+        uses: actions/checkout@v4
+
+      - name: Load acme.sh cache to retain certificate info
+        # 加载acme.sh缓存，保留证书信息
+        uses: actions/cache@v3
+        with:
+          path: /home/runner/.acme.sh
+          key: acme-sh-cache-${{ github.repository }}
+
+      - name: Install acme.sh script
+        # 安装acme.sh脚本
+        run: curl https://get.acme.sh | sh
+
+      - name: Execute renew task, skip if certificate is valid
+        # 执行续期任务，证书未到期则自动跳过
+        run: |
+          set +e
+          ${ACME_PATH} --issue --renew \
+            -d ${DOMAINS} \
+            --dns dns_cf \
+            --server letsencrypt \
+            --dnssleep 60
+          ret=$?
+          set -e
+
+          if [ $ret -eq 2 ]; then
+            echo "✅ Certificate is still valid, skip renewal"
+            echo "✅ 证书仍在有效期内，跳过本次续期"
+            exit 0
+          elif [ $ret -ne 0 ]; then
+            echo "❌ Certificate renewal failed"
+            echo "❌ 证书续期执行失败"
+            exit $ret
+          fi
+
+      - name: Update certificate files inside repository
+        # 更新仓库内的证书文件
+        run: |
+          mkdir -p ./ssl_certs
+          MAIN_DOMAIN=${DOMAINS%% *}_ecc
+          cp ~/.acme.sh/${MAIN_DOMAIN}/fullchain.cer ./ssl_certs/fullchain.pem
+          cp ~/.acme.sh/${MAIN_DOMAIN}/${DOMAINS%% *}.key ./ssl_certs/private.key
+          cp ~/.acme.sh/${MAIN_DOMAIN}/ca.cer ./ssl_certs/ca.cer
+          cp ~/.acme.sh/${MAIN_DOMAIN}/${DOMAINS%% *}.cer ./ssl_certs/domain.cer
+
+      - name: Auto commit to prevent actions 60-day idle deactivation
+        # 自动提交代码，避免Actions闲置60天被系统禁用
+        run: |
+          git config --local user.name "Actions Bot"
+          git config --local user.email "actions@github.com"
+          git add ./ssl_certs/
+          git commit -m "chore: Auto update SSL Certificate
+          自动更新SSL证书 $(date -u '+%Y-%m-%d')" --allow-empty
+          git push

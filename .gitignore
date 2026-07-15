@@ -1,0 +1,23 @@
+# SSL certificate output (already tracked in ssl_certs/)
+# ssl_certs/
+
+# Environment variables
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+#临时文件
+*.tmp

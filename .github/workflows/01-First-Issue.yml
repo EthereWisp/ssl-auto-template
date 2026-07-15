@@ -1,0 +1,66 @@
+# Step 1: First SSL Certificate Initial Issuance
+# 第一步：SSL证书首次初始化签发
+
+name: Step 1: First SSL Certificate Initial Issuance
+# 第一步：SSL证书首次初始化签发
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain_list:
+        description: |
+          Fill in domains, separate multiple domains with spaces. Wildcard format: domain.com *.domain.com
+          填写域名，多个域名使用空格分隔，泛域名格式：domain.com *.domain.com
+        required: true
+        default: "example.com *.example.com"
+
+permissions:
+  contents: write
+
+jobs:
+  ssl_init:
+    runs-on: ubuntu-latest
+    env:
+      CF_Token: ${{ secrets.CF_TOKEN }}
+      CF_Zone_ID: ${{ secrets.CF_ZONE_ID }}
+      ACME_PATH: /home/runner/.acme.sh/acme.sh
+      DOMAINS: ${{ github.event.inputs.domain_list }}
+
+    steps:
+      - name: Pull repository source code
+        # 拉取仓库源码
+        uses: actions/checkout@v4
+
+      - name: Install and initialize acme.sh
+        # 安装并初始化acme.sh环境
+        run: curl https://get.acme.sh | sh
+
+      - name: Issue brand new SSL certificate via Cloudflare DNS
+        # 调用Cloudflare DNS签发全新SSL证书
+        run: |
+          mkdir -p ./ssl_certs
+          ${ACME_PATH} --issue \
+            -d ${DOMAINS} \
+            --dns dns_cf \
+            --server letsencrypt \
+            --dnssleep 60
+
+      - name: Copy certificate files to ssl_certs folder
+        # 将证书文件复制到仓库ssl_certs目录
+        run: |
+          mkdir -p ./ssl_certs
+          MAIN_DOMAIN=${DOMAINS%% *}_ecc
+          cp ~/.acme.sh/${MAIN_DOMAIN}/fullchain.cer ./ssl_certs/fullchain.pem
+          cp ~/.acme.sh/${MAIN_DOMAIN}/${DOMAINS%% *}.key ./ssl_certs/private.key
+          cp ~/.acme.sh/${MAIN_DOMAIN}/ca.cer ./ssl_certs/ca.cer
+          cp ~/.acme.sh/${MAIN_DOMAIN}/${DOMAINS%% *}.cer ./ssl_certs/domain.cer
+
+      - name: Commit initial certificate files to repo
+        # 将初始化证书提交至仓库
+        run: |
+          git config --local user.name "Actions Bot"
+          git config --local user.email "actions@github.com"
+          git add ./ssl_certs/
+          git commit -m "init: Initialize SSL Certificate
+          初始化SSL证书"
+          git push
